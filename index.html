@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RemoveBG - Hapus Background Foto</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="url(#grad)"/>
+                    <path d="M8 16C8 11.58 11.58 8 16 8C20.42 8 24 11.58 24 16C24 20.42 20.42 24 16 24" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M12 20L20 12" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+                    <defs>
+                        <linearGradient id="grad" x1="0" y1="0" x2="32" y2="32">
+                            <stop stop-color="#6366f1"/>
+                            <stop offset="1" stop-color="#8b5cf6"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span>RemoveBG<small>26</small></span>
+            </div>
+            <p class="tagline">Hapus background foto dengan presisi tinggi — langsung di browser</p>
+        </header>
+
+        <!-- Upload Area -->
+        <section id="uploadSection" class="upload-section">
+            <div class="upload-area" id="dropZone">
+                <div class="upload-icon">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                </div>
+                <h2>Seret & Lepas Foto di Sini</h2>
+                <p>atau klik untuk memilih file</p>
+                <p class="upload-hint">Mendukung JPG, PNG, WEBP — Maks 20MB</p>
+                <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden>
+            </div>
+        </section>
+
+        <!-- Processing Section -->
+        <section id="processSection" class="process-section hidden">
+            <div class="preview-container">
+                <!-- Original -->
+                <div class="preview-card">
+                    <div class="preview-label">Original</div>
+                    <div class="preview-image-wrapper">
+                        <img id="originalImage" alt="Foto original">
+                    </div>
+                </div>
+
+                <!-- Arrow -->
+                <div class="arrow-icon">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                </div>
+
+                <!-- Result -->
+                <div class="preview-card">
+                    <div class="preview-label">Hasil</div>
+                    <div class="preview-image-wrapper checkerboard">
+                        <img id="resultImage" alt="Hasil tanpa background" class="hidden">
+                        <div id="processingOverlay" class="processing-overlay">
+                            <div class="spinner"></div>
+                            <p id="processingText">Menghapus background...</p>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="actions" id="actionsBar">
+                <button class="btn btn-secondary" id="btnNewImage">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="1 4 1 10 7 10"/>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                    </svg>
+                    Foto Baru
+                </button>
+                <button class="btn btn-primary" id="btnDownload" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download PNG
+                </button>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Pemrosesan dilakukan sepenuhnya di browser Anda — foto tidak diunggah ke server manapun.</p>
+        </footer>
+    </div>
+
+    <script type="module" src="/src/app.ts"></script>
+</body>
+</html>
