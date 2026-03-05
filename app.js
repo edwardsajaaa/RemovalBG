@@ -1,39 +1,32 @@
-import {
-  AutoModel,
-  AutoProcessor,
-  env,
-  RawImage,
-  Tensor,
-  type Processor,
-} from "@xenova/transformers";
+import { AutoModel, AutoProcessor, env, RawImage } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
 
 // ── Transformers.js config ──────────────────────────────────────────────────
 env.allowLocalModels = false;
-(env as Record<string, unknown>).useBrowserCache = true;
+env.useBrowserCache = true;
 
 const MODEL_ID = "briaai/RMBG-1.4";
-let model: Awaited<ReturnType<typeof AutoModel.from_pretrained>> | null = null;
-let processor: Processor | null = null;
+let model = null;
+let processor = null;
 
 // ── DOM refs ────────────────────────────────────────────────────────────────
-const dropZone = document.getElementById("dropZone") as HTMLLabelElement;
-const fileInput = document.getElementById("fileInput") as HTMLInputElement;
-const uploadSection = document.getElementById("uploadSection") as HTMLElement;
-const processSection = document.getElementById("processSection") as HTMLElement;
-const originalImage = document.getElementById("originalImage") as HTMLImageElement;
-const resultImage = document.getElementById("resultImage") as HTMLImageElement;
-const processingOverlay = document.getElementById("processingOverlay") as HTMLDivElement;
-const processingText = document.getElementById("processingText") as HTMLParagraphElement;
-const progressFill = document.getElementById("progressFill") as HTMLDivElement;
-const btnDownload = document.getElementById("btnDownload") as HTMLButtonElement;
-const btnNewImage = document.getElementById("btnNewImage") as HTMLButtonElement;
+const dropZone       = document.getElementById("dropZone");
+const fileInput      = document.getElementById("fileInput");
+const uploadSection  = document.getElementById("uploadSection");
+const processSection = document.getElementById("processSection");
+const originalImage  = document.getElementById("originalImage");
+const resultImage    = document.getElementById("resultImage");
+const processingOverlay = document.getElementById("processingOverlay");
+const processingText    = document.getElementById("processingText");
+const progressFill      = document.getElementById("progressFill");
+const btnDownload    = document.getElementById("btnDownload");
+const btnNewImage    = document.getElementById("btnNewImage");
 
-let resultBlob: Blob | null = null;
+let resultBlob = null;
 
 // ── Upload event handlers ───────────────────────────────────────────────────
-// Note: dropZone is a <label for="fileInput">, so click opens file picker natively.
+// dropZone is a <label for="fileInput">, so click opens file picker natively.
 
-dropZone.addEventListener("dragover", (e: DragEvent) => {
+dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
   dropZone.classList.add("dragover");
 });
@@ -42,7 +35,7 @@ dropZone.addEventListener("dragleave", () => {
   dropZone.classList.remove("dragover");
 });
 
-dropZone.addEventListener("drop", (e: DragEvent) => {
+dropZone.addEventListener("drop", (e) => {
   e.preventDefault();
   dropZone.classList.remove("dragover");
   const file = e.dataTransfer?.files[0];
@@ -70,17 +63,15 @@ btnDownload.addEventListener("click", () => {
 });
 
 // ── Model loader (lazy + cached) ────────────────────────────────────────────
-type ProgressInfo = { status: string; loaded?: number; total?: number; progress?: number };
-
-async function ensureModelLoaded(): Promise<void> {
+async function ensureModelLoaded() {
   if (model && processor) return;
 
   setProgress("Memuat model AI (pertama kali ~40MB)...", 5);
 
   model = await AutoModel.from_pretrained(MODEL_ID, {
     config: { model_type: "custom" },
-    progress_callback: (info: ProgressInfo) => {
-      if (info.status === "progress" && info.total && info.total > 0 && info.loaded !== undefined) {
+    progress_callback: (info) => {
+      if (info.status === "progress" && info.total > 0) {
         const pct = 5 + Math.round((info.loaded / info.total) * 45);
         setProgress(`Mengunduh model AI... ${Math.round(info.progress ?? 0)}%`, pct);
       }
@@ -103,13 +94,13 @@ async function ensureModelLoaded(): Promise<void> {
   });
 }
 
-function setProgress(text: string, pct: number): void {
+function setProgress(text, pct) {
   processingText.textContent = text;
   progressFill.style.width = Math.min(pct, 100) + "%";
 }
 
 // ── Core: remove background ─────────────────────────────────────────────────
-async function handleFile(file: File): Promise<void> {
+async function handleFile(file) {
   if (file.size > 20 * 1024 * 1024) {
     alert("Ukuran file terlalu besar. Maksimal 20MB.");
     return;
@@ -118,18 +109,15 @@ async function handleFile(file: File): Promise<void> {
   uploadSection.classList.add("hidden");
   processSection.classList.remove("hidden");
 
-  // Show original preview
   const previewUrl = URL.createObjectURL(file);
   originalImage.src = previewUrl;
 
-  // Reset result state
   resultImage.classList.add("hidden");
   processingOverlay.classList.remove("hidden");
   btnDownload.disabled = true;
   resultBlob = null;
   setProgress("Memuat model AI...", 0);
 
-  // Separate blob URL used for processing (revoked in finally)
   const blobUrl = URL.createObjectURL(file);
 
   try {
@@ -142,44 +130,37 @@ async function handleFile(file: File): Promise<void> {
 
     // 3. Preprocess
     setProgress("Menjalankan AI...", 65);
-    const { pixel_values } = (await processor!(rawImage)) as { pixel_values: unknown };
+    const { pixel_values } = await processor(rawImage);
 
     // 4. Inference
     setProgress("Menghapus background...", 75);
-    const { output } = (await model!({ input: pixel_values })) as { output: RawImage[] };
+    const { output } = await model({ input: pixel_values });
 
-    // 5. Build alpha mask, resized back to original dimensions
+    // 5. Build alpha mask resized to original dimensions
     setProgress("Menerapkan mask...", 90);
-    const rawTensor = output[0] as unknown as Tensor;
-    const mask = await RawImage.fromTensor(rawTensor.mul(255).to("uint8")).resize(
-      rawImage.width,
-      rawImage.height
-    );
+    const mask = await RawImage.fromTensor(output[0].mul(255).to("uint8"))
+      .resize(rawImage.width, rawImage.height);
 
-    // 6. Decode original file into an ImageBitmap for lossless pixel access
+    // 6. Draw original at native resolution for lossless quality
     const bitmap = await createImageBitmap(file);
-
     const canvas = document.createElement("canvas");
     canvas.width = bitmap.width;
     canvas.height = bitmap.height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-
-    // Draw at native resolution — no resampling, no quality loss
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(bitmap, 0, 0);
     bitmap.close();
 
-    // Apply mask as alpha channel
+    // 7. Apply mask as alpha channel
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const { data } = imageData;
     for (let i = 0; i < mask.data.length; i++) {
-      data[4 * i + 3] = (mask.data as Uint8Array)[i];
+      imageData.data[4 * i + 3] = mask.data[i];
     }
     ctx.putImageData(imageData, 0, 0);
 
-    // 7. Export as lossless PNG (no quality parameter = full quality)
-    const blob = await new Promise<Blob>((resolve, reject) => {
+    // 8. Export as lossless PNG
+    const blob = await new Promise((resolve, reject) => {
       canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("Canvas toBlob returned null"))),
+        (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
         "image/png"
       );
     });
@@ -190,10 +171,10 @@ async function handleFile(file: File): Promise<void> {
     processingOverlay.classList.add("hidden");
     btnDownload.disabled = false;
     setProgress("Selesai!", 100);
-  } catch (err: unknown) {
+  } catch (err) {
     console.error("Background removal failed:", err);
     setProgress("Gagal memproses. Silakan coba lagi.", 0);
-    const spinner = processingOverlay.querySelector<HTMLDivElement>(".spinner");
+    const spinner = processingOverlay.querySelector(".spinner");
     if (spinner) spinner.style.display = "none";
   } finally {
     URL.revokeObjectURL(blobUrl);
@@ -201,7 +182,7 @@ async function handleFile(file: File): Promise<void> {
 }
 
 // ── Reset ───────────────────────────────────────────────────────────────────
-function resetUI(): void {
+function resetUI() {
   uploadSection.classList.remove("hidden");
   processSection.classList.add("hidden");
   originalImage.src = "";
@@ -213,6 +194,6 @@ function resetUI(): void {
   fileInput.value = "";
   setProgress("Menghapus background...", 0);
 
-  const spinner = processingOverlay.querySelector<HTMLDivElement>(".spinner");
+  const spinner = processingOverlay.querySelector(".spinner");
   if (spinner) spinner.style.display = "";
 }
