@@ -118,48 +118,59 @@ async function handleFile(file) {
   resultBlob = null;
   setProgress("Memuat model AI...", 0);
 
-  const blobUrl = URL.createObjectURL(file);
-
   try {
     // 1. Load model (cached after first run)
     await ensureModelLoaded();
 
-    // 2. Load image for inference
+    // 2. Decode file to bitmap — createImageBitmap auto-applies EXIF orientation
+    //    so we get the exact pixels the user sees, at full native resolution.
     setProgress("Memproses gambar...", 55);
-    const rawImage = await RawImage.fromURL(blobUrl);
+    const bitmap = await createImageBitmap(file);
+    const origW = bitmap.width;
+    const origH = bitmap.height;
 
-    // 3. Preprocess
+    // 3. Draw onto an offscreen canvas — this is the single source of truth for pixels.
+    const srcCanvas = document.createElement("canvas");
+    srcCanvas.width  = origW;
+    srcCanvas.height = origH;
+    const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
+    srcCtx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+
+    // 4. Build a RawImage directly from the canvas pixels so the AI sees the
+    //    same oriented, full-resolution image — no separate decode, no mismatch.
+    const srcPixels = srcCtx.getImageData(0, 0, origW, origH);
+    const rawImage  = new RawImage(srcPixels.data, origW, origH, 4);
+
+    // 5. Preprocess → inference
     setProgress("Menjalankan AI...", 65);
     const { pixel_values } = await processor(rawImage);
 
-    // 4. Inference
     setProgress("Menghapus background...", 75);
     const { output } = await model({ input: pixel_values });
 
-    // 5. Build alpha mask resized to original dimensions
+    // 6. Resize mask back to EXACTLY the original canvas dimensions.
+    //    Because rawImage was built from the canvas, origW/origH are guaranteed
+    //    to match — no EXIF dimension flip risk.
     setProgress("Menerapkan mask...", 90);
     const mask = await RawImage.fromTensor(output[0].mul(255).to("uint8"))
-      .resize(rawImage.width, rawImage.height);
+      .resize(origW, origH);
 
-    // 6. Draw original at native resolution for lossless quality
-    const bitmap = await createImageBitmap(file);
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
-
-    // 7. Apply mask as alpha channel
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    for (let i = 0; i < mask.data.length; i++) {
-      imageData.data[4 * i + 3] = mask.data[i];
+    // 7. Apply mask as alpha channel on top of the original pixels.
+    //    We re-use srcCanvas so we don't re-decode anything.
+    const imageData = srcCtx.getImageData(0, 0, origW, origH);
+    const pixels    = imageData.data;
+    const maskData  = mask.data;
+    const total     = origW * origH;
+    for (let i = 0; i < total; i++) {
+      pixels[4 * i + 3] = maskData[i];
     }
-    ctx.putImageData(imageData, 0, 0);
+    srcCtx.putImageData(imageData, 0, 0);
 
-    // 8. Export as lossless PNG
+    // 8. Export as lossless PNG — no quality param means maximum quality,
+    //    full resolution, nothing cropped.
     const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(
+      srcCanvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
         "image/png"
       );
@@ -176,8 +187,6 @@ async function handleFile(file) {
     setProgress("Gagal memproses. Silakan coba lagi.", 0);
     const spinner = processingOverlay.querySelector(".spinner");
     if (spinner) spinner.style.display = "none";
-  } finally {
-    URL.revokeObjectURL(blobUrl);
   }
 }
 
