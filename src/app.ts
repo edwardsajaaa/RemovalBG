@@ -16,7 +16,7 @@ let model: Awaited<ReturnType<typeof AutoModel.from_pretrained>> | null = null;
 let processor: Processor | null = null;
 
 // ── DOM refs ────────────────────────────────────────────────────────────────
-const dropZone = document.getElementById("dropZone") as HTMLDivElement;
+const dropZone = document.getElementById("dropZone") as HTMLLabelElement;
 const fileInput = document.getElementById("fileInput") as HTMLInputElement;
 const uploadSection = document.getElementById("uploadSection") as HTMLElement;
 const processSection = document.getElementById("processSection") as HTMLElement;
@@ -31,7 +31,7 @@ const btnNewImage = document.getElementById("btnNewImage") as HTMLButtonElement;
 let resultBlob: Blob | null = null;
 
 // ── Upload event handlers ───────────────────────────────────────────────────
-dropZone.addEventListener("click", () => fileInput.click());
+// Note: dropZone is a <label for="fileInput">, so click opens file picker natively.
 
 dropZone.addEventListener("dragover", (e: DragEvent) => {
   e.preventDefault();

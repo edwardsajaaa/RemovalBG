@@ -295,6 +295,16 @@ body {
     display: none !important;
 }
 
+/* Hide file input visually but keep it functional */
+#fileInput {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
     .preview-container {
