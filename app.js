@@ -222,30 +222,123 @@ function _doColorRemoval() {
     const px = imageData.data;
     const total = origW * origH;
 
-    // Build mask: 0 = remove (background), 1 = keep (foreground)
-    setProgress("Menghitung jarak warna...", 30);
-    const mask = new Float32Array(total);
-    const softRange = Math.max(edgeSoft * 3, 1);
-
+    // ── Step 1: Compute CIE LAB distance for every pixel ──
+    setProgress("Menghitung jarak warna...", 15);
+    const distMap = new Float32Array(total);
     for (let i = 0; i < total; i++) {
-      const lab = rgbToLab(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]);
-      const dist = deltaE(targetLab, lab);
+      distMap[i] = deltaE(targetLab, rgbToLab(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]));
+    }
 
-      if (dist <= tolerance) {
-        mask[i] = 0;
-      } else if (dist >= tolerance + softRange) {
-        mask[i] = 1;
-      } else {
-        mask[i] = (dist - tolerance) / softRange;
+    // ── Step 2: Flood-fill from image borders (connected background detection) ──
+    // Only pixels connected to the border AND within tolerance are marked as BG.
+    // This prevents random interior pixels from being removed.
+    setProgress("Mendeteksi area background...", 30);
+    const bgMask = new Uint8Array(total);
+    const queue = new Int32Array(total);
+    let qHead = 0, qTail = 0;
+
+    // Seed: border pixels within tolerance
+    for (let x = 0; x < origW; x++) {
+      const top = x, bot = (origH - 1) * origW + x;
+      if (distMap[top] <= tolerance && !bgMask[top]) { bgMask[top] = 1; queue[qTail++] = top; }
+      if (distMap[bot] <= tolerance && !bgMask[bot]) { bgMask[bot] = 1; queue[qTail++] = bot; }
+    }
+    for (let y = 1; y < origH - 1; y++) {
+      const left = y * origW, right = y * origW + origW - 1;
+      if (distMap[left] <= tolerance && !bgMask[left]) { bgMask[left] = 1; queue[qTail++] = left; }
+      if (distMap[right] <= tolerance && !bgMask[right]) { bgMask[right] = 1; queue[qTail++] = right; }
+    }
+
+    // BFS with 8-connectivity
+    while (qHead < qTail) {
+      const idx = queue[qHead++];
+      const x = idx % origW;
+      const y = (idx - x) / origW;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || nx >= origW || ny < 0 || ny >= origH) continue;
+          const ni = ny * origW + nx;
+          if (!bgMask[ni] && distMap[ni] <= tolerance) {
+            bgMask[ni] = 1;
+            queue[qTail++] = ni;
+          }
+        }
       }
     }
 
-    // Smooth edges with gaussian blur
-    setProgress("Menghaluskan tepi...", 65);
-    const smoothed = edgeSoft > 0 ? gaussianBlur(mask, origW, origH, edgeSoft) : mask;
+    // ── Step 3: Expand BG boundary to capture anti-aliased fringe pixels ──
+    // Two passes with progressively higher tolerance, requiring more BG neighbors
+    // each round so only genuine fringe pixels are absorbed.
+    setProgress("Membersihkan tepi gambar...", 50);
+    const expandPasses = [
+      { tol: tolerance * 1.3, minBg: 2 },
+      { tol: tolerance * 1.6, minBg: 3 },
+    ];
 
-    // Build output
-    setProgress("Menerapkan mask...", 85);
+    for (const pass of expandPasses) {
+      const toMark = [];
+      for (let y = 0; y < origH; y++) {
+        for (let x = 0; x < origW; x++) {
+          const idx = y * origW + x;
+          if (bgMask[idx]) continue;
+          let bgN = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nx2 = x + dx, ny2 = y + dy;
+              if (nx2 >= 0 && nx2 < origW && ny2 >= 0 && ny2 < origH && bgMask[ny2 * origW + nx2]) bgN++;
+            }
+          }
+          if (bgN >= pass.minBg && distMap[idx] <= pass.tol) toMark.push(idx);
+        }
+      }
+      for (const idx of toMark) bgMask[idx] = 1;
+    }
+
+    // ── Step 4: Build base alpha mask ──
+    setProgress("Membuat mask transparansi...", 65);
+    const mask = new Float32Array(total);
+    for (let i = 0; i < total; i++) {
+      mask[i] = bgMask[i] ? 0 : 1;
+    }
+
+    // ── Step 5: Refine alpha for boundary foreground pixels (anti-alias) ──
+    // For foreground pixels adjacent to BG, compute sub-pixel alpha using
+    // a combination of color distance and spatial context.
+    setProgress("Menghaluskan batas tepi...", 75);
+    for (let y = 0; y < origH; y++) {
+      for (let x = 0; x < origW; x++) {
+        const idx = y * origW + x;
+        if (mask[idx] === 0) continue;
+        let bgN = 0, totalN = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && nx < origW && ny >= 0 && ny < origH) {
+              totalN++;
+              if (bgMask[ny * origW + nx]) bgN++;
+            }
+          }
+        }
+        if (bgN > 0) {
+          const dist = distMap[idx];
+          const bgRatio = bgN / totalN;
+          const colorAlpha = Math.min(1, Math.max(0, (dist - tolerance * 0.7) / (tolerance * 0.8)));
+          mask[idx] = colorAlpha * (1 - bgRatio * 0.4);
+        }
+      }
+    }
+
+    // ── Step 6: Optional Gaussian blur for soft edges ──
+    const finalMask = edgeSoft > 0 ? gaussianBlur(mask, origW, origH, edgeSoft) : mask;
+
+    // ── Step 7: Build output with defringe ──
+    // For semi-transparent edge pixels, remove background color contamination
+    // using alpha un-premultiplication: fg = (pixel - (1-a)*bg) / a
+    setProgress("Menerapkan hasil akhir...", 88);
     const outCanvas = document.createElement("canvas");
     outCanvas.width = origW;
     outCanvas.height = origH;
@@ -254,10 +347,23 @@ function _doColorRemoval() {
     const out = outData.data;
 
     for (let i = 0; i < total; i++) {
-      out[i * 4]     = px[i * 4];
-      out[i * 4 + 1] = px[i * 4 + 1];
-      out[i * 4 + 2] = px[i * 4 + 2];
-      out[i * 4 + 3] = Math.round(Math.max(0, Math.min(1, smoothed[i])) * 255);
+      const alpha = Math.max(0, Math.min(1, finalMask[i]));
+      const a8 = Math.round(alpha * 255);
+      if (a8 === 0) {
+        out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = out[i * 4 + 3] = 0;
+      } else if (a8 === 255) {
+        out[i * 4]     = px[i * 4];
+        out[i * 4 + 1] = px[i * 4 + 1];
+        out[i * 4 + 2] = px[i * 4 + 2];
+        out[i * 4 + 3] = 255;
+      } else {
+        // Defringe: estimate true foreground color by subtracting BG bleed
+        const inv = 1 - alpha;
+        out[i * 4]     = Math.max(0, Math.min(255, Math.round((px[i * 4]     - inv * pickedColor[0]) / alpha)));
+        out[i * 4 + 1] = Math.max(0, Math.min(255, Math.round((px[i * 4 + 1] - inv * pickedColor[1]) / alpha)));
+        out[i * 4 + 2] = Math.max(0, Math.min(255, Math.round((px[i * 4 + 2] - inv * pickedColor[2]) / alpha)));
+        out[i * 4 + 3] = a8;
+      }
     }
 
     outCtx.putImageData(outData, 0, 0);
